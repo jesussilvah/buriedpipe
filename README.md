@@ -2,8 +2,8 @@
 <img src="./buriedpipe_logo.png" width="50%"/>
 </p>
 
-# TO DO !!
+# What is BuriedPipe
 
-This is a Discrete Element Method simulation application, for disks in a periodic cell.
+BuriedPipe is a 2D Discrete Element Method (DEM) simulation application, for disks in a periodic cell. It focuses on a pipe that is placed within a granular packing made of disks.
 
 
