@@ -1,0 +1,24 @@
+60       Number of spheres along the width
+1e-3     Max radius
+0.4e-3   Variation of the radius
+40e-3    Pipe external radius
+4e-3     Pipe Thickness
+36       Pipe number of Nodes
+1        Out-of-plane size
+1e20     Yield stress (elastic limit)
+1e3      Young modulus of the pipe
+0.33     Poisson coefficient of the pipe
+3.0      Density of the pipe
+0        Norm of random velocities
+1        Confinement pressure
+1        Density of particle material
+1e3      kn
+1        kt/kn
+0.98     Damping rate
+0.5      Friction coefficient
+1e-6     time step
+10       final time
+0.01     time between neighbor list update
+0.1      time between records
+0.25     time between conf-files
+
