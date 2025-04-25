@@ -261,8 +261,16 @@ void BuriedPipe::setSample() {
   std::getline(file, line);
   line = trim(line);
   std::cout << line << " -> " << ngw << std::endl;
-  double step = 1.0 / (2.0 * ngw);  // in range 0 to 1
-
+//////////////////////////////////////////////////////
+  double stepw = 1.0 / (2.0 * ngw);  // in range 0 to 1
+  int ngh = 15;
+  std::cout << std::endl;
+  file >> ngh;
+  std::getline(file, line);
+  line = trim(line);
+  std::cout << line << " -> " << ngh << std::endl;
+  double steph = 1.0 / (2.0 * ngh);  // in range 0 to 1
+/////////////////////////////////////////////////////////
   double radius = 1e-3;
   file >> radius;
   std::getline(file, line);
@@ -274,7 +282,9 @@ void BuriedPipe::setSample() {
   line = trim(line);
   std::cout << line << " -> " << deltaR << std::endl;
   vec2r from(0.0, 0.0);
-  vec2r to(2.0 * (ngw + 1) * radius, 2.0 * (ngw + 1) * radius);
+////////////////////////////////////////////////////
+  vec2r to(2.0 * (ngw + 1) * radius, 2.0 * (ngh + 1) * radius);
+////////////////////////////////////////////////////
   Cell.Define(to.x, from.y, from.x, to.y);
   dVerlet = 0.95 * (radius - deltaR);
 
@@ -368,14 +378,16 @@ void BuriedPipe::setSample() {
     P.mass = M_PI * P.radius * P.radius * density;
     massTot += P.mass;
     P.inertia = 0.5 * P.mass * P.radius * P.radius;
+////////////////////////////////////////////////////
     int column = i % ngw;
     int row = i / ngw;
     if (row % 2 == 0) {  // even row
-      P.pos.x = step + 2 * column * step;
+      P.pos.x = stepw + 2 * column * stepw;
     } else {  // odd row
-      P.pos.x = 2 * step + 2 * column * step;
+      P.pos.x = 2 * stepw + 2 * column * stepw;
     }
-    P.pos.y = step + 2 * row * step;
+    P.pos.y = steph + 2 * row * steph;
+////////////////////////////////////////////////////////
     double dd = norm(Cell.h * (P.pos - mid)) - 1.01 * P.radius;
     if (P.pos.y <= 1. - step && dd > pipe.radius) {
       Particles.push_back(P);
@@ -941,7 +953,12 @@ void BuriedPipe::accelerations() {
     
     double dl = pipe.L[i] - pipe.L0;
     double fn = pipe.k_stretch * dl; // positive is repulsive
-    
+///////////////////////////////////////////
+    double dtheta = pipe.angle[i] - pipe.angle0;
+    double M_bend = -pipe.k_bend * dtheta; 
+    double Sigmax_pipe = fn/(pipe.L0 * pipe_h) + (M_bend * pipe_h/2)/ Ic
+    double Sigmin_pipe = fn/(pipe.L0 * pipe_h) - (M_bend * pipe_h/2)/ Ic
+///////////////////////////////////////////    
     vec2r f = fn * pipe.u[i]; // from i to inext
     pipe.force[i] -= f;
     pipe.force[inext] += f;
