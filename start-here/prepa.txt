@@ -6,7 +6,7 @@
 36       Pipe number of Nodes
 1        Out-of-plane size
 1e20     Yield stress (elastic limit)
-1e3      Young modulus of the pipe
+1e9      Young modulus of the pipe
 0.33     Poisson coefficient of the pipe
 3.0      Density of the pipe
 0        Norm of random velocities

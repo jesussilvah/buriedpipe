@@ -16,50 +16,75 @@
 // toofus
 #include "AABB.hpp"
 #include "ColorTable.hpp"
+#include "delaunay2D.hpp"
 #include "fileTool.hpp"
 #include "glTools.hpp"
-#include "delaunay2D.hpp"
 #include "mat4.hpp"
-#include "mat9.hpp"
 
-// triangulation
-struct triangle_element {
-  size_t p0{0};
-  size_t p1{0};
-  size_t p2{0};
-  mat4r F;
-  vec2r translation;
-  mat4r E;
-  double I1{0.0};
-  double I2{0.0};
-  double I3{0.0};
+struct ParticleData {
+  mat4r Sigma;
+  double volume;
+  double q;
+  double p;
 };
 
-std::vector<triangle_element> triangles;
-double I2min, I2max;
-ColorTable triangleColorTable;
+struct PipeNodeData {
+  double angleRad; // position angle of the node with respect to x horizontal axis
+  double N;        // axial force
+  double M;        // bending moment
+  double externalHoopStress;
+};
+
+struct ZoneData {
+  vec2r corner[4];
+  mat4r Sigma;
+  double K{0.0};
+  size_t nbParticles{0};
+
+  bool isInside(const vec2r &point) {
+    // Compute cross products for each edge
+    double cp1 = cross(corner[1] - corner[0], point - corner[0]); // crossProduct(corner0, corner1, point);
+    double cp2 = cross(corner[2] - corner[1], point - corner[1]); // crossProduct(corner1, corner2, point);
+    double cp3 = cross(corner[3] - corner[2], point - corner[2]); // crossProduct(corner2, corner3, point);
+    double cp4 = cross(corner[0] - corner[3], point - corner[3]); // crossProduct(corner3, corner0, point);
+
+    // Determine if the point is on the same side of all edges
+    bool side1 = (cp1 >= 0) && (cp2 >= 0) && (cp3 >= 0) && (cp4 >= 0);
+    bool side2 = (cp1 <= 0) && (cp2 <= 0) && (cp3 <= 0) && (cp4 <= 0);
+
+    return side1 || side2;
+  }
+};
+
+std::vector<ParticleData> pdata;
 
 // the conf files
-BuriedPipe RefConf;
 BuriedPipe Conf;
-int refConfNum = 1;
 int confNum = 1;
 
 AABB worldBox;
 
 int main_window;
 
+#define PLOT_AXIAL_FORCE 0
+#define PLOT_BENDING_MOMENT 1
+#define PLOT_HOOPSTRESS 2
+
 // flags
-int ref_fixed = 1;
-int show_background = 1;
+int show_background = 1; // not used
 int show_particles = 1;
 int show_ghosts = 0;
-int show_displacements = 0;
-int show_fluctuations = 0;
 int show_cell = 1;
 int show_forces = 0;
+int show_contacts = 0;
 int showOrientations = 0;
-int showMesh = 1;
+int show_pipe = 1;
+int show_pipe_nodes = 1;
+
+int show_pipe_plot = 0;
+int pipe_plot_option = PLOT_AXIAL_FORCE;
+
+int show_material_arround = 0;
 
 int color_option = 0;
 ColorTable colorTable;
@@ -81,24 +106,21 @@ glTextZone textZone(1, &width, &height);
 
 // Miscellaneous global variables
 enum MouseMode { NOTHING, ROTATION, ZOOM, PAN } mouse_mode = NOTHING;
-int display_mode = 0;  // sample or slice rotation
+int display_mode = 0; // sample or slice rotation
 int mouse_start[2];
 
 // Drawing functions
 void setColor(int i, GLfloat alpha);
 void drawForces();
 void drawContacts();
-void drawFluctuations();
-void drawDisplacements();
 void drawBox();
 void drawParticles();
 void drawPipe();
 void drawGhosts();
-void drawMesh();
 
-// triangulation
-void triangulate();
-void computeTriangleStrain();
+// Graphics
+void renderMaterialArround();
+void plotPipe();
 
 // Callback functions
 void keyboard(unsigned char Key, int x, int y);
@@ -112,8 +134,7 @@ void menu(int num);
 void buildMenu();
 void printHelp();
 void fit_view();
-bool try_to_readConf(int num, BuriedPipe& CF, int& OKNum);
+bool try_to_readConf(int num, BuriedPipe &CF, int &OKNum);
 void updateTextLine();
-void add_ghost_pos(int i, double mn, double mx, std::vector<vec2r> & lst);
-
-
+void add_ghost_pos(int i, double mn, double mx, std::vector<vec2r> &lst);
+void computeParticleData();

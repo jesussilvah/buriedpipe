@@ -24,7 +24,7 @@ class BuriedPipe {
   std::vector<InteractionPipe> InteractionsPipe;
   Loading Load;
   PeriodicCell Cell;
-  //double Sigxx, Sigxy, Sigyx, Sigyy;  // Internal stress
+  // double Sigxx, Sigxy, Sigyx, Sigyy;  //  Internal stress
   mat4r Sig;
 
   struct force_backup_t {
@@ -40,8 +40,8 @@ class BuriedPipe {
   double interOutC{0.0}, interOut{0.1};
   double interHistC{0.0}, interHist{0.25};
   double density{2700.0};
-  double kn{1.e4};
-  double kt{1.e4};
+  double kn{1e4};
+  double kt{1e4};
   double dampRate{0.95};
   double vBarrier{0.0};
   double numericalDampingCoeff{0.0};
@@ -59,9 +59,15 @@ class BuriedPipe {
   BuriedPipe();
   void setSample();
   void integrate();
+  
+  void computeForces_particle_particle();
+  void computeForces_particle_pipe();
+  void computeForces_internal_pipe();
   void accelerations();
+  
   void ResetCloseList(double dmax);
   void ResetCloseListPipe(double dmax);
+  
   void saveConf(int i);
   void saveConf(const char* name);
   void loadConf(const char* name);

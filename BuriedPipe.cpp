@@ -8,14 +8,14 @@ BuriedPipe::BuriedPipe() {
 
 void BuriedPipe::saveConf(int i) {
   char fname[256];
-  snprintf(fname, 256, "conf%d", i);
+  snprintf(fname, sizeof(fname), "conf%d", i);
   saveConf(fname);
 }
 
-void BuriedPipe::saveConf(const char* fname) {
+void BuriedPipe::saveConf(const char *fname) {
   std::ofstream conf(fname);
 
-  conf << "PBC 27-11-2014" << std::endl;  // format: progName version-date
+  conf << "BuriedPipe 2025" << std::endl; // format: progName version-date
   conf << "t " << t << std::endl;
   conf << "tmax " << tmax << std::endl;
   conf << "dt " << dt << std::endl;
@@ -39,10 +39,12 @@ void BuriedPipe::saveConf(const char* fname) {
 
   conf << std::setprecision(15);
 
-  conf << "Pipe " << pipe.pos.size() << ' ' << pipe.node_radius << ' ' << pipe.node_mass << ' ' << pipe.k_stretch << ' '
-       << pipe.k_bend << ' ' << pipe.yieldMoment << std::endl;
+  conf << "Pipe " << pipe.pos.size() << ' ' << pipe.radius << ' ' << pipe.node_radius << ' ' << pipe.node_mass << ' '
+       << pipe.L0 << ' ' << pipe.angle0 << ' ' << pipe.k_stretch << ' ' << pipe.k_bend << ' ' << pipe.yieldMoment
+       << std::endl;
   for (size_t i = 0; i < pipe.pos.size(); i++) {
-    conf << pipe.pos[i] << " " << pipe.vel[i] << " " << pipe.acc[i] << std::endl;
+    conf << pipe.pos[i] << " " << pipe.vel[i] << " " << pipe.acc[i] << " " << pipe.force[i] << " " << pipe.moment[i]
+         << " " << pipe.L[i] << " " << pipe.angle[i] << std::endl;
   }
 
   conf << "Particles " << Particles.size() << std::endl;
@@ -80,12 +82,12 @@ void BuriedPipe::saveConf(const char* fname) {
     if (fabs(InteractionsPipe[i].fn) < 1.0e-15) {
       continue;
     }
-    conf << InteractionsPipe[i].i << " " << InteractionsPipe[i].inode << " " << InteractionsPipe[i].fn << " "
-         << InteractionsPipe[i].ft << " " << InteractionsPipe[i].damp << std::endl;
+    conf << InteractionsPipe[i].i << " " << InteractionsPipe[i].inode << " " << InteractionsPipe[i].proj_div_L << " "
+         << InteractionsPipe[i].fn << " " << InteractionsPipe[i].ft << " " << InteractionsPipe[i].damp << std::endl;
   }
 }
 
-void BuriedPipe::loadConf(const char* name) {
+void BuriedPipe::loadConf(const char *name) {
   std::ifstream conf(name);
   if (!conf.is_open()) {
     std::cerr << "Cannot read " << name << std::endl;
@@ -94,16 +96,16 @@ void BuriedPipe::loadConf(const char* name) {
   // Check header
   std::string prog;
   conf >> prog;
-  if (prog != "PBC") {
-    std::cerr << "This is not file for PBC executable!" << std::endl;
+  if (prog != "BuriedPipe") {
+    std::cerr << "This is not file for BuriedPipe executable!" << std::endl;
   }
   std::string date;
   conf >> date;
-  if (date != "27-11-2014") {
-    std::cerr << "The version-date should be 27-11-2014!" << std::endl;
+  if (date != "2025") {
+    std::cerr << "The version-date should be 2025!" << std::endl;
   }
 
-  fnMax=0.0;
+  fnMax = 0.0;
 
   std::string token;
   conf >> token;
@@ -176,12 +178,18 @@ void BuriedPipe::loadConf(const char* name) {
       }
     } else if (token == "Pipe") {
       size_t nb;
-      conf >> nb >> pipe.node_radius >> pipe.node_mass >> pipe.k_stretch >> pipe.k_bend >> pipe.yieldMoment;
-      pipe.reset(nb);
-      vec2r POS, VEL, ACC;
+      conf >> nb >> pipe.radius >> pipe.node_radius >> pipe.node_mass >> pipe.L0 >> pipe.angle0 >> pipe.k_stretch >>
+          pipe.k_bend >> pipe.yieldMoment;
+      pipe.build_and_init(pipe.radius, 2.0 * pipe.node_radius, nb);
+      vec2r POS, VEL, ACC, FORCE;
+      double MOMENT, LEN, ANGLE;
       for (size_t i = 0; i < nb; i++) {
-        conf >> POS >> VEL >> ACC;
+        conf >> POS >> VEL >> ACC >> FORCE >> MOMENT >> LEN >> ANGLE;
         pipe.addNode(POS, VEL, ACC);
+        pipe.force[i] = FORCE;
+        pipe.moment[i] = MOMENT;
+        pipe.L[i] = LEN;
+        pipe.angle[i] = ANGLE;
       }
     } else if (token == "Particles") {
       size_t nb;
@@ -223,7 +231,7 @@ void BuriedPipe::loadConf(const char* name) {
       InteractionsPipe.clear();
       InteractionPipe I;
       for (size_t i = 0; i < nb; i++) {
-        conf >> I.i >> I.inode >> I.fn >> I.ft >> I.damp;
+        conf >> I.i >> I.inode >> I.proj_div_L >> I.fn >> I.ft >> I.damp;
         if (I.fn > fnMax) {
           fnMax = I.fn;
         }
@@ -235,7 +243,7 @@ void BuriedPipe::loadConf(const char* name) {
 
     conf >> token;
   }
-  
+
   pipe.update(Cell.h);
 }
 
@@ -245,7 +253,7 @@ void BuriedPipe::setSample() {
     std::cerr << "Cannot read 'prepa.txt'" << std::endl;
   }
 
-  auto trim = [](const std::string& str) -> std::string {
+  auto trim = [](const std::string &str) -> std::string {
     size_t first = str.find_first_not_of(' ');
     size_t last = str.find_last_not_of(' ');
     return (first == std::string::npos) ? "" : str.substr(first, (last - first + 1));
@@ -261,7 +269,7 @@ void BuriedPipe::setSample() {
   std::getline(file, line);
   line = trim(line);
   std::cout << line << " -> " << ngw << std::endl;
-  double step = 1.0 / (2.0 * ngw);  // in range 0 to 1
+  double step = 1.0 / (2.0 * ngw); // in range 0 to 1
 
   double radius = 1e-3;
   file >> radius;
@@ -295,9 +303,9 @@ void BuriedPipe::setSample() {
   std::getline(file, line);
   line = trim(line);
   std::cout << line << " -> " << pipeNbNodes << std::endl;
-  pipe.reset(pipeNbNodes);
+  pipe.build_and_init(pipeRadius, pipeThickness, pipeNbNodes);
 
-  double pipe_h = 1.0;
+  double pipe_h = 1.0; // out-of-plane size
   file >> pipe_h;
   std::getline(file, line);
   line = trim(line);
@@ -330,22 +338,20 @@ void BuriedPipe::setSample() {
   pipe.radius = pipeRadius;
   pipe.node_radius = 0.5 * pipeThickness;
   pipe.node_mass = M_PI * (pipeRadius * pipeRadius - (pipeRadius - pipeThickness) * (pipeRadius - pipeThickness)) *
-                   pipeDensity / (double)pipeNbNodes;
+                   pipeDensity / static_cast<double>(pipeNbNodes);
 
-  pipe.k_stretch = Young * pipe_h / (1.0 - Poisson * Poisson);
-  pipe.k_bend = Young * (pipe_h * pipe_h * pipe_h) / (12.0 * (1.0 - Poisson * Poisson));
-  //double L = 2.0 * M_PI * (pipe.radius - pipe.node_radius) / (double)pipeNbNodes;
-  //pipe.L0 = L;
-  
-  double Ic = (pipe_h * pipe_h * pipe_h) * pipe.L0 / 12.0;
-  pipe.yieldMoment = 4.0 * Ic * sigY / pipe_h;
+  pipe.k_stretch = Young * (pipeThickness * pipe_h) / (1.0 - Poisson * Poisson);
+  pipe.k_bend = Young * (pipeThickness * pipeThickness * pipeThickness) / (12.0 * (1.0 - Poisson * Poisson));
+
+  double Ic = (pipeThickness * pipeThickness * pipeThickness) * pipe_h / 12.0;
+  pipe.yieldMoment = 4.0 * Ic * sigY / pipeThickness;
 
   std::cout << "   Pipe k_stretch   = " << pipe.k_stretch << std::endl;
   std::cout << "   Pipe k_bend      = " << pipe.k_bend << std::endl;
   std::cout << "   Pipe yieldMoment = " << pipe.yieldMoment << std::endl;
 
   mat4r hinv = Cell.h.get_inverse();
-  double da = 2.0 * M_PI / (double)pipeNbNodes;
+  double da = 2.0 * M_PI / static_cast<double>(pipeNbNodes);
   vec2r zero(0.0, 0.0);
   vec2r mid(0.5, 0.5);
   double Rmean = pipeRadius - 0.5 * pipeThickness;
@@ -357,6 +363,7 @@ void BuriedPipe::setSample() {
     pipe.acc.push_back(zero);
     pipe.u.push_back(zero);
     pipe.force.push_back(zero);
+    pipe.moment.push_back(0.0);
     pipe.L.push_back(pipe.L0);
     pipe.angle.push_back(pipe.angle0);
   }
@@ -370,9 +377,9 @@ void BuriedPipe::setSample() {
     P.inertia = 0.5 * P.mass * P.radius * P.radius;
     int column = i % ngw;
     int row = i / ngw;
-    if (row % 2 == 0) {  // even row
+    if (row % 2 == 0) { // even row
       P.pos.x = step + 2 * column * step;
-    } else {  // odd row
+    } else { // odd row
       P.pos.x = 2 * step + 2 * column * step;
     }
     P.pos.y = step + 2 * row * step;
@@ -383,8 +390,7 @@ void BuriedPipe::setSample() {
     i++;
   }
 
-  Cell.mass = massTot / sqrt((double)Particles.size());  // / sqrt((double)Particles.size());
-  // Cell.mass corresponds to nearly the mass of a line or column of particles
+  Cell.mass = massTot / sqrt((double)Particles.size()); // cell mass = mean mass of one particle
 
   // Set ramdom velocities to particles
   double vmax = 0.1;
@@ -560,6 +566,7 @@ void BuriedPipe::integrate() {
       Cell.ah.yy = 0.0;
     }
 
+    pipe.update(Cell.h);
     accelerations();
 
     // Limit the velocity of cell boundaries (vertical and horizontal only)
@@ -710,11 +717,11 @@ void BuriedPipe::ResetCloseListPipe(double dmax) {
   for (size_t i = 0; i < Particles.size(); i++) {
     // if (to far) {continue;}
     for (size_t in = 0; in < pipe.pos.size(); in++) {
-      vec2r n = pipe.u[in].quarterRightTurned();//(pipe.u[in].y, -pipe.u[in].x);
+      vec2r n = pipe.u[in].quarterRightTurned(); //(pipe.u[in].y, -pipe.u[in].x);
       vec2r Sij = Cell.h * (pipe.pos[in] - Particles[i].pos);
       double distn = fabs(Sij * n) - Particles[i].radius - pipe.node_radius;
       double projt = -Sij * pipe.u[in];
-      if (projt >= -pipe.node_radius -dmax && projt < pipe.L[in] + pipe.node_radius + dmax && distn <= dmax) {
+      if (projt >= -pipe.node_radius - dmax && projt < pipe.L[in] + pipe.node_radius + dmax && distn <= dmax) {
         double m = (Particles[i].mass * pipe.node_mass) / (Particles[i].mass + pipe.node_mass);
         double Damp = dampRate * 2.0 * sqrt(kn * m);
         InteractionsPipe.push_back(InteractionPipe(i, in, Damp));
@@ -748,22 +755,7 @@ void BuriedPipe::ResetCloseListPipe(double dmax) {
   }
 }
 
-void BuriedPipe::accelerations() {
-  // Set all forces and moments to zero
-  for (size_t i = 0; i < Particles.size(); i++) {
-    Particles[i].force.reset();
-    Particles[i].moment = 0.0;
-  }
-
-  for (size_t i = 0; i < pipe.force.size(); i++) {
-    pipe.force[i].reset();
-  }
-
-  Sig.reset();
-
-  // ===============================
-  // Loop over particle interactions
-  // ===============================
+void BuriedPipe::computeForces_particle_particle() {
   size_t i, j;
   for (size_t k = 0; k < Interactions.size(); k++) {
     i = Interactions[k].i;
@@ -775,7 +767,7 @@ void BuriedPipe::accelerations() {
     vec2r branch = Cell.h * sij;
 
     double sum = Particles[i].radius + Particles[j].radius;
-    if (norm2(branch) <= sum * sum) {  // it means that i and j are in contact
+    if (norm2(branch) <= sum * sum) { // it means that i and j are in contact
 
       vec2r n = branch;
       double len = n.normalize();
@@ -820,12 +812,14 @@ void BuriedPipe::accelerations() {
       Interactions[k].fn = 0.0;
       Interactions[k].ft = 0.0;
     }
-  }  // Loop over particle interactions
+  } // Loop over particle interactions
+}
 
-
+void BuriedPipe::computeForces_particle_pipe() {
   // ====================================
   // Loop over the interactions with pipe
   // ====================================
+  size_t i;
   size_t inode;
   for (size_t k = 0; k < InteractionsPipe.size(); k++) {
     i = InteractionsPipe[k].i;
@@ -833,13 +827,15 @@ void BuriedPipe::accelerations() {
 
     vec2r sij = pipe.pos[inode] - Particles[i].pos;
     vec2r branch = Cell.h * sij;
-    // remember we do not consider periodicity here (we are far from the boundaries)
+    // remember we do not consider periodicity here (we are far from the
+    // boundaries)
 
     double proj = -branch * pipe.u[inode];
-    vec2r n = pipe.u[inode].quarterLeftTurned();//(-pipe.u[inode].y, pipe.u[inode].x);
+    InteractionsPipe[k].proj_div_L = proj / pipe.L[inode];
+    vec2r n = pipe.u[inode].quarterLeftTurned(); //(-pipe.u[inode].y, pipe.u[inode].x);
     double dn = fabs(branch * n) - Particles[i].radius - pipe.node_radius;
 
-    if (dn < 0.0 && proj >= 0.0 && proj <= pipe.L[inode]) {  // contact with flat side
+    if (dn < 0.0 && proj >= 0.0 && proj <= pipe.L[inode]) { // contact with flat side
 
       double xi_next = proj / pipe.L[inode];
       double xi = 1.0 - xi_next;
@@ -882,10 +878,11 @@ void BuriedPipe::accelerations() {
       Sig.yx += f.y * branch.x;
       Sig.yy += f.y * branch.y;
 
-    } else if (proj < 0.0) {  // contact with the vextex disk (starting one, not the end)
-      
+    } else if (proj < 0.0) { // contact with the vextex disk (starting one, not
+                             // the end)
+
       double sum = Particles[i].radius + pipe.node_radius;
-      if (norm2(branch) <= sum * sum) {  // it means that i and j are in contact
+      if (norm2(branch) <= sum * sum) { // it means that i and j are in contact
 
         vec2r n = branch;
         double len = n.normalize();
@@ -930,29 +927,73 @@ void BuriedPipe::accelerations() {
       InteractionsPipe[k].fn = 0.0;
       InteractionsPipe[k].ft = 0.0;
     }
-  }  // end loop over particle-pipe interactions
+  } // end loop over particle-pipe interactions
+}
 
-  // ======================
-  // forces inside the pipe
-  // ======================
-  // TODO (for now there is only linear springs of the barres)
-  for (size_t i = 0 ; i < pipe.pos.size(); i++) {
-    size_t inext = (i+1)%pipe.pos.size();
-    
+void BuriedPipe::computeForces_internal_pipe() {
+  // beam-like forces and moments
+  for (size_t i = 0; i < pipe.pos.size(); i++) {
+    size_t inext = (i + 1) % pipe.pos.size();
+    size_t iprev = (i - 1 + pipe.pos.size()) % pipe.pos.size();
+
+    // linear spring
     double dl = pipe.L[i] - pipe.L0;
-    double fn = pipe.k_stretch * dl; // positive is repulsive
-    
+    double fn = -pipe.k_stretch * dl; // positive is repulsive
+
     vec2r f = fn * pipe.u[i]; // from i to inext
     pipe.force[i] -= f;
     pipe.force[inext] += f;
+
+    // angular spring
+    pipe.moment[i] = pipe.k_bend * (pipe.angle[i] - pipe.angle0);
+
+    /*
+        // TODO: PLASTICITY in rotations
+        if (pipe.moment[i] > pipe.yieldMoment) {
+          pipe.moment[i] = pipe.yieldMoment;
+        } else if (pipe.moment[i] < -pipe.yieldMoment) {
+          pipe.moment[i] = -pipe.yieldMoment;
+        }
+    */
+
+    // moment/2 on next
+    vec2r finc_next = (0.5 * pipe.moment[i] / pipe.L[i]) * pipe.u[i].quarterLeftTurned();
+    pipe.force[inext] += finc_next;
+    pipe.force[i] -= finc_next;
+
+    // -moment/2 on prev
+    vec2r finc_prev = (0.5 * pipe.moment[i] / pipe.L[iprev]) * pipe.u[iprev].quarterLeftTurned();
+    pipe.force[iprev] += finc_prev;
+    pipe.force[i] -= finc_prev;
   }
+
+  // internal pressure (TODO)
+}
+
+void BuriedPipe::accelerations() {
+  // Set all forces and moments to zero
+  for (size_t i = 0; i < Particles.size(); i++) {
+    Particles[i].force.reset();
+    Particles[i].moment = 0.0;
+  }
+
+  for (size_t i = 0; i < pipe.force.size(); i++) {
+    pipe.force[i].reset();
+    pipe.moment[i] = 0.0;
+  }
+
+  Sig.reset();
+
+  computeForces_particle_particle();
+  computeForces_particle_pipe();
+  computeForces_internal_pipe();
 
   // ======================================================
   // Damping and finishing the computation of accelerations
   // ======================================================
   double invV = 1.0 / Cell.h.det();
   Sig *= invV;
-  
+
   // Cundall damping for particles
   double factor = 0.0;
   double factorMinus = 0.0;
@@ -969,25 +1010,20 @@ void BuriedPipe::accelerations() {
       Particles[i].force.y *= factor;
     }
   }
-  
-  // TODO ?? Cundall damping for the pipe
+
+  //  TODO ?? Cundall damping for the pipe
 
   // Finally compute the accelerations (translation and rotation)
+  // Compute inverse of the matrix h
+  mat4r hinv = Cell.h.get_inverse();
   for (size_t i = 0; i < Particles.size(); i++) {
-    Particles[i].acc = Particles[i].force / Particles[i].mass;
-
-    // Compute inverse of the matrix h
-    double invDet = 1.0 / (Cell.h.xx * Cell.h.yy - Cell.h.yx * Cell.h.xy);
-    double hxxinv = invDet * Cell.h.yy;
-    double hxyinv = -invDet * Cell.h.xy;
-    double hyxinv = -invDet * Cell.h.yx;
-    double hyyinv = invDet * Cell.h.xx;
-
-    vec2r acc = Particles[i].acc;
-    Particles[i].acc.x = hxxinv * acc.x + hxyinv * acc.y;
-    Particles[i].acc.y = hyxinv * acc.x + hyyinv * acc.y;
-
+    Particles[i].acc = hinv * (Particles[i].force / Particles[i].mass);
     Particles[i].arot = Particles[i].moment / Particles[i].inertia;
+  }
+
+  double inv_pipe_node_mass = 1.0 / pipe.node_mass;
+  for (size_t i = 0; i < pipe.force.size(); i++) {
+    pipe.acc[i] = hinv * (pipe.force[i] * inv_pipe_node_mass);
   }
 
   if (Load.Drive.xx == ForceDriven) {

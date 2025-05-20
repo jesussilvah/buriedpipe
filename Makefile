@@ -3,12 +3,19 @@ UNAME_S := $(shell uname -s)
 ifeq ($(UNAME_S),Darwin)
   CXX = g++-14
   CXXFLAGS = -O3 -Wall -Wextra -std=c++17 -I ./toofus
-  GLLINK = `pkg-config --libs glut` -framework OpenGL
-	GLFLAGS = `pkg-config --cflags glut`
+  GLLINK = `pkg-config --libs gl glu glut`
+	GLFLAGS = `pkg-config --cflags gl glu glut`	
+	# on apple, use brew to install freeglut and mesa-glu
 else
   CXX = g++
   CXXFLAGS = -O3 -Wall -std=c++17 -I ./toofus
   GLLINK = -lGLU -lGL -L/usr/X11R6/lib -lglut -lXmu -lXext -lX11 -lXi
+endif
+
+# Ensure the toofus directory exists
+ifeq ($(wildcard ./toofus),)
+$(info Cloning ToOfUs repository)
+$(shell git clone https://github.com/richefeu/toofus.git > /dev/null 2>&1)
 endif
 
 # The list of source files
@@ -22,24 +29,24 @@ OBJECTS = $(SOURCES:%.cpp=%.o)
 all: BuriedPipe see
 
 clean:
-	echo "\033[0;32m-> Remove object files\033[0m"
+	@echo "\033[0;32m-> Remove object files\033[0m"
 	rm -f *.o
-	echo "\033[0;32m-> Remove BuriedPipe and see\033[0m"
-	rm -f BuriedPipe see
-	echo "\033[0;32m-> Remove libBuriedPipe.a\033[0m"
+	@echo "\033[0;32m-> Remove compiled applications\033[0m"
+	rm -f BuriedPipe see extract_oval stress2pipe
+	@echo "\033[0;32m-> Remove libBuriedPipe.a\033[0m"
 	rm -f libBuriedPipe.a
 
 clean+: clean
-	echo "\033[0;32m-> Remove local folder toofus\033[0m"
+	@echo "\033[0;32m-> Remove local folder toofus\033[0m"
 	rm -rf ./toofus
 	
 clone_toofus:
 	@if [ ! -d "./toofus" ]; then \
-		echo "\033[0;32m-> CLONING ToOfUs (Tools often used)\033[0m"; \
+		@echo "\033[0;32m-> CLONING ToOfUs (Tools often used)\033[0m"; \
 		git clone https://github.com/richefeu/toofus.git; \
 	fi
 
-%.o: %.cpp clone_toofus
+%.o: %.cpp 
 	@echo "\033[0;32m-> COMPILING OBJECT" $@ "\033[0m"
 	$(CXX) $(CXXFLAGS) -c $< -o $@
 
@@ -57,6 +64,14 @@ see: see.cpp libBuriedPipe.a
 	$(CXX) $(CXXFLAGS) -c $< -o see.o $(GLFLAGS)
 	$(CXX) -o $@ see.o libBuriedPipe.a $(GLLINK)
 	
+extract_oval: extract_oval.cpp libBuriedPipe.a
+	@echo "\033[0;32m-> BUILDING APPLICATION" $@ "\033[0m"
+	$(CXX) $(CXXFLAGS) -c $< -o extract_oval.o
+	$(CXX) -o $@ extract_oval.o libBuriedPipe.a
 	
+stress2pipe: stress2pipe.cpp
+	@echo "\033[0;32m-> BUILDING APPLICATION" $@ "\033[0m"
+	$(CXX) $(CXXFLAGS) -c $< -o stress2pipe.o
+	$(CXX) -o $@ stress2pipe.o
 	
 	
