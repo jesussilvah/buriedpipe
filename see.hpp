@@ -39,7 +39,25 @@ struct ZoneData {
   vec2r corner[4];
   mat4r Sigma;
   double K{0.0};
+  double pressure{0.0};
   size_t nbParticles{0};
+
+  double volume() {
+    double h1 = 0.5 * fabs(cross(corner[1] - corner[0], corner[3] - corner[0]));
+    double h2 = 0.5 * fabs(cross(corner[1] - corner[2], corner[3] - corner[2]));
+    return h1 + h2;
+  }
+
+  bool insideCell(const mat4r &H) {
+    ZoneData theCell;
+    theCell.corner[0].set(0.0, 0.0);
+    theCell.corner[1].set(H.xx, H.yx);
+    theCell.corner[2].set(H.xx + H.xy, H.yx + H.yy);
+    theCell.corner[3].set(H.xy, H.yy);
+    bool res = theCell.isInside(corner[0]) && theCell.isInside(corner[1]) && theCell.isInside(corner[2]) &&
+               theCell.isInside(corner[3]);
+    return res;
+  }
 
   bool isInside(const vec2r &point) {
     // Compute cross products for each edge
@@ -70,6 +88,9 @@ int main_window;
 #define PLOT_BENDING_MOMENT 1
 #define PLOT_HOOPSTRESS 2
 
+#define MAT_AROUND_PRESSURE 0
+#define MAT_AROUND_K 1
+
 // flags
 int show_background = 1; // not used
 int show_particles = 1;
@@ -79,12 +100,13 @@ int show_forces = 0;
 int show_contacts = 0;
 int showOrientations = 0;
 int show_pipe = 1;
-int show_pipe_nodes = 1;
+int show_pipe_nodes = 0;
 
 int show_pipe_plot = 0;
-int pipe_plot_option = PLOT_AXIAL_FORCE;
+int pipe_plot_option = PLOT_HOOPSTRESS;
 
-int show_material_arround = 0;
+int show_material_around = 0;
+int material_around_option = MAT_AROUND_K;
 
 int color_option = 0;
 ColorTable colorTable;
@@ -110,7 +132,7 @@ int display_mode = 0; // sample or slice rotation
 int mouse_start[2];
 
 // Drawing functions
-void setColor(int i, GLfloat alpha);
+void setColor(int i, GLfloat alpha); // this will set a color depending on the selected option
 void drawForces();
 void drawContacts();
 void drawBox();
@@ -119,8 +141,8 @@ void drawPipe();
 void drawGhosts();
 
 // Graphics
-void renderMaterialArround();
-void plotPipe();
+void renderMaterialAround(); // this function draw stress information in material around the pipe
+void plotPipe(); // this function makes a polaar plot where 0 is the pipe mean axis and negative values are outgoing
 
 // Callback functions
 void keyboard(unsigned char Key, int x, int y);

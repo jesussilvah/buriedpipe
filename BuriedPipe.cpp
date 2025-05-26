@@ -2,16 +2,38 @@
 
 #include "BuriedPipe.hpp"
 
+/**
+ * @brief Construct a new BuriedPipe object
+ *
+ * Initializes a new instance of the BuriedPipe class with default values.
+ */
 BuriedPipe::BuriedPipe() {
-  // default values?
+  // There's actually nothing to do
 }
 
+/**
+ * @brief Save the current configuration to a file named conf<i>
+ *
+ * This function generates a filename in the form "conf<i>" and calls
+ * saveConf(const char*) with it. It is used to save the configuration
+ * at equidistant points in time.
+ *
+ * @param i the index of the file
+ */
 void BuriedPipe::saveConf(int i) {
   char fname[256];
   snprintf(fname, sizeof(fname), "conf%d", i);
   saveConf(fname);
 }
 
+/**
+ * @brief Save the current configuration to a file named fname
+ *
+ * Saves the current configuration of the simulation to a file named fname.
+ * This file is a text file that can be used to restart the simulation.
+ *
+ * @param fname Name of the output file
+ */
 void BuriedPipe::saveConf(const char *fname) {
   std::ofstream conf(fname);
 
@@ -31,6 +53,7 @@ void BuriedPipe::saveConf(const char *fname) {
   conf << "numericalDampingCoeff " << numericalDampingCoeff << std::endl;
   conf << "mu " << mu << std::endl;
   conf << "iconf " << iconf << std::endl;
+  conf << "h0 " << h0 << std::endl;
   conf << "h " << Cell.h << std::endl;
   conf << "vh " << Cell.vh << std::endl;
   conf << "ah " << Cell.ah << std::endl;
@@ -146,8 +169,13 @@ void BuriedPipe::loadConf(const char *name) {
       conf >> mu;
     } else if (token == "iconf") {
       conf >> iconf;
+    } else if (token == "h0") {
+      conf >> h0;
     } else if (token == "h") {
       conf >> Cell.h;
+      if (fabs(h0.xx) < 1e-12) {
+        h0 = Cell.h;
+      }
     } else if (token == "vh") {
       conf >> Cell.vh;
     } else if (token == "ah") {
@@ -247,6 +275,9 @@ void BuriedPipe::loadConf(const char *name) {
   pipe.update(Cell.h);
 }
 
+/**
+ * Set the sample from the file prepa.txt
+ */
 void BuriedPipe::setSample() {
   std::ifstream file("prepa.txt");
   if (!file.is_open()) {
@@ -486,7 +517,37 @@ void BuriedPipe::setSample() {
   return;
 }
 
-// The integration loop (Velocity Verlet)
+void BuriedPipe::record(std::ostream &os) {
+  mat4r F = Cell.h * h0.get_inverse();
+  mat4r E = 0.5 * (F.transposed() * F - mat4r::unit());
+
+  double A = Sig.xx - Sig.yy;
+  double B = Sig.xy + Sig.yx;
+  double q = sqrt(0.5 * (A * A + B * B));
+  double p = 0.5 * (Sig.xx + Sig.yy);
+
+  //                                               1 1 1 1     1           1
+  //    1           2 3 4 5         6 7 8 9        0 1 2 3     4           5
+  os << t << " " << Cell.h << " " << Sig << " " << E << " " << q << " " << p << std::endl;
+  interOutC = 0.0;
+}
+
+/**
+ * @brief The integration loop (Velocity Verlet)
+ *
+ * This function performs the time integration of the system using the Velocity
+ * Verlet algorithm. It updates the positions, velocities and accelerations of all
+ * particles and the pipe nodes, and takes into account the boundary conditions.
+ *
+ * The function also handles the output of the simulation, by writing the
+ * relevant data to a file at regular intervals.
+ *
+ * @param[in] dt the time step
+ * @param[in] tmax the maximum time
+ * @param[in] interClose the interval between close neighbour lists updates
+ * @param[in] interOut the interval between output file writes
+ * @param[in] interHist the interval between configuration file writes
+ */
 void BuriedPipe::integrate() {
   double dt_2 = 0.5 * dt;
   double dt2_2 = 0.5 * dt * dt;
@@ -496,6 +557,8 @@ void BuriedPipe::integrate() {
   saveConf(iconf);
 
   std::ofstream fileOut("output.txt");
+  record(fileOut);
+
   while (t <= tmax) {
 
     if (Load.ServoFunction != nullptr) {
@@ -507,15 +570,19 @@ void BuriedPipe::integrate() {
       if (constrainedInFrame == 1) {
         while (Particles[i].pos.x < 0.0) {
           Particles[i].pos.x += 1.0;
+          Particles[i].vel = Cell.h.get_inverse() * (Cell.h * Particles[i].vel + Cell.vh * vec2r(1.0, 0.0));
         }
         while (Particles[i].pos.x > 1.0) {
           Particles[i].pos.x -= 1.0;
+          Particles[i].vel = Cell.h.get_inverse() * (Cell.h * Particles[i].vel + Cell.vh * vec2r(-1.0, 0.0));
         }
         while (Particles[i].pos.y < 0.0) {
           Particles[i].pos.y += 1.0;
+          Particles[i].vel = Cell.h.get_inverse() * (Cell.h * Particles[i].vel + Cell.vh * vec2r(0.0, 1.0));
         }
         while (Particles[i].pos.y > 1.0) {
           Particles[i].pos.y -= 1.0;
+          Particles[i].vel = Cell.h.get_inverse() * (Cell.h * Particles[i].vel + Cell.vh * vec2r(0.0, -1.0));
         }
       }
       Particles[i].vel += dt_2 * Particles[i].acc;
@@ -624,8 +691,8 @@ void BuriedPipe::integrate() {
     }
 
     if (interOutC >= interOut - dt_2) {
-      fileOut << t << " " << Cell.h << " " << Sig << std::endl;
-      interOutC = 0.0;
+
+      record(fileOut);
     }
 
     if (interHistC >= interHist - dt_2) {
@@ -638,6 +705,18 @@ void BuriedPipe::integrate() {
 
   return;
 }
+
+/**
+ * Resets and rebuilds the list of interactions between particles within a specified distance.
+ *
+ * This function first stores the tangential force components from the current interactions,
+ * clears the existing interactions list, and then rebuilds it by checking each pair of particles.
+ * If the distance between a pair of particles is within a specified threshold (`dmax`),
+ * a new interaction is created with a damping factor based on the masses of the particles.
+ * The tangential force components are then restored for the newly formed interactions.
+ *
+ * @param dmax The maximum distance threshold for considering interactions between particles.
+ */
 
 void BuriedPipe::ResetCloseList(double dmax) {
   // store ft because the list will be cleared before being rebuilt
@@ -696,6 +775,11 @@ void BuriedPipe::ResetCloseList(double dmax) {
   }
 }
 
+/**
+ * Reset the list of interactions between particles and pipe.
+ *
+ * @param dmax maximum distance between a particle and a pipe node
+ */
 void BuriedPipe::ResetCloseListPipe(double dmax) {
   // Here, we suppose that the pipe is far enough from any periodic boundary
   // So, no periodic images is considered in this function
@@ -755,6 +839,14 @@ void BuriedPipe::ResetCloseListPipe(double dmax) {
   }
 }
 
+/**
+ * Compute the forces between particles and store them in Interactions.
+ *
+ * The normal force is computed as the sum of an elastic and a viscous term,
+ * the tangential force is computed as the sum of an elastic and a viscous term  * and a friction term.
+ *
+ * If the particles are not in contact, the forces are set to 0.0
+ */
 void BuriedPipe::computeForces_particle_particle() {
   size_t i, j;
   for (size_t k = 0; k < Interactions.size(); k++) {
@@ -762,8 +854,11 @@ void BuriedPipe::computeForces_particle_particle() {
     j = Interactions[k].j;
 
     vec2r sij = Particles[j].pos - Particles[i].pos;
-    sij.x -= floor(sij.x + 0.5);
-    sij.y -= floor(sij.y + 0.5);
+    vec2r imag_j_period_move(floor(sij.x + 0.5), floor(sij.y + 0.5));
+
+    // sij.x -= floor(sij.x + 0.5);
+    // sij.y -= floor(sij.y + 0.5);
+    sij -= imag_j_period_move;
     vec2r branch = Cell.h * sij;
 
     double sum = Particles[i].radius + Particles[j].radius;
@@ -774,8 +869,10 @@ void BuriedPipe::computeForces_particle_particle() {
       vec2r t(-n.y, n.x);
 
       // real relative velocities
-      vec2r vel = Particles[j].vel - Particles[i].vel;
-      vec2r realVel = Cell.h * vel + Cell.vh * sij;
+      vec2r vel = Particles[j].vel - Particles[i].vel; // reduced coordinates
+      // vec2r realVel = Cell.h * vel + Cell.vh * sij;
+      vec2r realVel = Cell.h * vel + Cell.vh * imag_j_period_move;
+
       double dn = len - Particles[i].radius - Particles[j].radius;
       double Bi = Particles[i].radius + 0.5 * dn;
       double Bj = Particles[j].radius + 0.5 * dn;
@@ -815,6 +912,18 @@ void BuriedPipe::computeForces_particle_particle() {
   } // Loop over particle interactions
 }
 
+/**
+ * Compute the forces between particles and the pipe and store them in
+ * InteractionsPipe.
+ *
+ * The normal force is computed as the sum of an elastic and a viscous term,
+ * the tangential force is computed as the sum of an elastic and a viscous term
+ * and a friction term.
+ *
+ * If the particles are not in contact, the forces are set to 0.0
+ *
+ * The function also compute the internal stress tensor
+ */
 void BuriedPipe::computeForces_particle_pipe() {
   // ====================================
   // Loop over the interactions with pipe
@@ -827,8 +936,7 @@ void BuriedPipe::computeForces_particle_pipe() {
 
     vec2r sij = pipe.pos[inode] - Particles[i].pos;
     vec2r branch = Cell.h * sij;
-    // remember we do not consider periodicity here (we are far from the
-    // boundaries)
+    // remember we do not consider periodicity here (we must be far from the boundaries)
 
     double proj = -branch * pipe.u[inode];
     InteractionsPipe[k].proj_div_L = proj / pipe.L[inode];
@@ -844,9 +952,9 @@ void BuriedPipe::computeForces_particle_pipe() {
       sij = (xi * pipe.pos[inode] + xi_next * pipe.pos[inode_next]) - Particles[i].pos;
       branch = Cell.h * sij;
 
-      // real relative velocities
+      // real relative velocities (wa assume there's no period-jump)
       vec2r vel = (xi * pipe.vel[inode] + xi_next * pipe.vel[inode_next]) - Particles[i].vel;
-      vec2r realVel = Cell.h * vel + Cell.vh * sij;
+      vec2r realVel = Cell.h * vel; // + Cell.vh * sij;
       double Bi = Particles[i].radius + 0.5 * dn;
 
       // Normal force (elastic + viscuous)
@@ -878,8 +986,7 @@ void BuriedPipe::computeForces_particle_pipe() {
       Sig.yx += f.y * branch.x;
       Sig.yy += f.y * branch.y;
 
-    } else if (proj < 0.0) { // contact with the vextex disk (starting one, not
-                             // the end)
+    } else if (proj < 0.0) { // contact with the vextex disk (starting one, not the end)
 
       double sum = Particles[i].radius + pipe.node_radius;
       if (norm2(branch) <= sum * sum) { // it means that i and j are in contact
@@ -890,11 +997,11 @@ void BuriedPipe::computeForces_particle_pipe() {
 
         // real relative velocities
         vec2r vel = pipe.vel[inode] - Particles[i].vel;
-        vec2r realVel = Cell.h * vel + Cell.vh * sij;
+        vec2r realVel = Cell.h * vel;// + Cell.vh * sij;
         double dn = len - Particles[i].radius - pipe.node_radius;
         double Bi = Particles[i].radius + 0.5 * dn;
 
-        // Normal force (elastic + viscuous)
+        // Normal force (elastic + viscous)
         double vn = realVel * n;
         double fne = -kn * dn;
         double fnv = -InteractionsPipe[k].damp * vn;
@@ -930,6 +1037,16 @@ void BuriedPipe::computeForces_particle_pipe() {
   } // end loop over particle-pipe interactions
 }
 
+/**
+ * Compute the internal forces and moments of the pipe.
+ *
+ * This function computes the internal forces and moments of the pipe by
+ * summing the external forces and moments applied to each node, and then
+ * distributing the forces and moments equally between the two nodes of
+ * each element.
+ *
+ * @post The internal forces and moments of the pipe are computed.
+ */
 void BuriedPipe::computeForces_internal_pipe() {
   // beam-like forces and moments
   for (size_t i = 0; i < pipe.pos.size(); i++) {
@@ -970,6 +1087,17 @@ void BuriedPipe::computeForces_internal_pipe() {
   // internal pressure (TODO)
 }
 
+/**
+ * Compute the accelerations of the particles and of the pipe.
+ *
+ * This function first sets all forces and moments to zero. Then it calls the
+ * three functions computing forces: particle-particle, particle-pipe and
+ * internal pipe. The Cundall damping is then applied on the forces and the
+ * accelerations are computed by dividing the forces by the mass of the
+ * particles and the pipe nodes. The inverse of the matrix h is also used for
+ * the computation of the accelerations. Finally, the acceleration of the
+ * periodic cell is computed by dividing the stress by the mass of the cell.
+ */
 void BuriedPipe::accelerations() {
   // Set all forces and moments to zero
   for (size_t i = 0; i < Particles.size(); i++) {

@@ -24,8 +24,8 @@ class BuriedPipe {
   std::vector<InteractionPipe> InteractionsPipe;
   Loading Load;
   PeriodicCell Cell;
-  // double Sigxx, Sigxy, Sigyx, Sigyy;  //  Internal stress
-  mat4r Sig;
+  mat4r h0; // initial cell shape (for strain computation)
+  mat4r Sig; //  Internal stress
 
   struct force_backup_t {
     size_t i{0}, j{0};
@@ -58,6 +58,7 @@ class BuriedPipe {
   // Methods
   BuriedPipe();
   void setSample();
+  void record(std::ostream & os);
   void integrate();
   
   void computeForces_particle_particle();

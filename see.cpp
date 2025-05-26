@@ -13,6 +13,7 @@ void printHelp() {
   std::cout << "g         show/hide ghost particles" << std::endl;
   std::cout << "h         print this help" << std::endl;
   std::cout << "i         print information" << std::endl;
+  std::cout << "m         show/hide polar plot" << std::endl;
   std::cout << "n         go to file (see terminal to enter the file number)" << std::endl;
   std::cout << "o         show/hide particle orientations" << std::endl;
   std::cout << "p         show/hide particles" << std::endl;
@@ -20,6 +21,7 @@ void printHelp() {
   std::cout << "q         quit" << std::endl;
   std::cout << "s/S       tune vector sizes" << std::endl;
   std::cout << "w/W       tune displayed ghost width" << std::endl;
+  std::cout << "x         show/hide surrouding material 'spider-map'" << std::endl;
   // std::cout << "x         xxxx" << std::endl;
   std::cout << std::endl;
   std::cout << "0         particles colored with light gray" << std::endl;
@@ -110,9 +112,9 @@ void keyboard(unsigned char Key, int /*x*/, int /*y*/) {
     std::cin >> conNumTry;
     try_to_readConf(conNumTry, Conf, confNum);
   } break;
-  
+
   case 'm': {
-    show_material_arround = 1 - show_material_arround;
+    show_material_around = 1 - show_material_around;
   } break;
 
   case 'o': {
@@ -184,23 +186,25 @@ void mouse(int button, int state, int x, int y) {
     mouse_start[0] = x;
     mouse_start[1] = y;
     switch (button) {
-    case GLUT_LEFT_BUTTON:
-      if (glutGetModifiers() == GLUT_ACTIVE_SHIFT)
+    case GLUT_LEFT_BUTTON: {
+      if (glutGetModifiers() == GLUT_ACTIVE_SHIFT) {
         mouse_mode = PAN;
-      else
+      } else {
         mouse_mode = ROTATION;
-      break;
-    case GLUT_MIDDLE_BUTTON:
+      }
+    } break;
+    case GLUT_MIDDLE_BUTTON: {
       mouse_mode = ZOOM;
-      break;
+    } break;
     }
   }
 }
 
 void motion(int x, int y) {
 
-  if (mouse_mode == NOTHING)
+  if (mouse_mode == NOTHING) {
     return;
+  }
 
   double dx = (double)(x - mouse_start[0]) / (double)width;
   double dy = (double)(y - mouse_start[1]) / (double)height;
@@ -232,7 +236,7 @@ void motion(int x, int y) {
   mouse_start[1] = y;
 
   reshape(width, height);
-  display();
+  // display();
 }
 
 void display() {
@@ -242,11 +246,15 @@ void display() {
   glMatrixMode(GL_MODELVIEW);
   glLoadIdentity();
 
-  glShadeModel(GL_SMOOTH);
-  glEnable(GL_DEPTH_TEST);
+  // glShadeModel(GL_SMOOTH);
+  // glEnable(GL_DEPTH_TEST);
 
   if (show_cell) {
     drawBox();
+  }
+
+  if (show_material_around == 1) {
+    renderMaterialAround();
   }
 
   if (show_particles == 1) {
@@ -271,10 +279,6 @@ void display() {
 
   if (show_pipe_plot == 1) {
     plotPipe();
-  }
-
-  if (show_material_arround == 1) {
-    renderMaterialArround();
   }
 
   textZone.draw();
@@ -446,10 +450,10 @@ void add_ghost_pos(int i, double mn, double mx, std::vector<vec2r> &lst) {
   }
 }
 
-void renderMaterialArround() {
+void renderMaterialAround() {
   size_t nbNodes = Conf.pipe.pos.size();
 
-  double zoneWidth = 0.003; // this will be changeable after
+  double zoneWidth = 2.0 * Conf.pipe.node_radius; // this will be changeable after
 
   std::vector<vec2r> radialDirection(nbNodes);
   std::vector<double> radiusPipe(nbNodes);
@@ -465,7 +469,8 @@ void renderMaterialArround() {
   }
 
   std::vector<ZoneData> zones;
-  for (size_t layer = 0; layer < 3; layer++) {
+
+  for (size_t layer = 0; layer < 6; layer++) {
     for (size_t i = 0; i < nbNodes; i++) {
       size_t inext = i + 1;
       if (inext >= nbNodes) {
@@ -476,22 +481,14 @@ void renderMaterialArround() {
       Z.corner[1] = center + (radiusPipe[i] + (layer + 1) * zoneWidth) * radialDirection[i];
       Z.corner[2] = center + (radiusPipe[inext] + (layer + 1) * zoneWidth) * radialDirection[inext];
       Z.corner[3] = center + (radiusPipe[inext] + layer * zoneWidth) * radialDirection[inext];
-      zones.push_back(Z);
+
+      if (Z.insideCell(Conf.Cell.h)) {
+        zones.push_back(Z);
+      }
     }
   }
 
   // compute things
-  /*
-  for (size_t i = 0; i < Conf.Particles.size(); i++) {
-    for (size_t iz = 0; iz < zones.size(); iz++) {
-      vec2r pos = Conf.Cell.h * Conf.Particles[i].pos;
-      if (zones[iz].isInside(pos)) {
-        zones[iz].nbParticles += 1;
-      }
-    }
-  }
-  */
-
   for (size_t k = 0; k < Conf.Interactions.size(); k++) {
     size_t i = Conf.Interactions[k].i;
     size_t j = Conf.Interactions[k].j;
@@ -544,21 +541,42 @@ void renderMaterialArround() {
   }
 
   for (size_t iz = 0; iz < zones.size(); iz++) {
+    zones[iz].Sigma /= zones[iz].volume();
+    zones[iz].pressure = 0.5 * (zones[iz].Sigma.xx + zones[iz].Sigma.yy);
     if (fabs(zones[iz].Sigma.yy) > 1e-8) {
       zones[iz].K = (zones[iz].Sigma.xx / zones[iz].Sigma.yy);
     }
   }
 
+  double minval = 1e12;
+  double maxval = -1e12;
+  if (material_around_option == MAT_AROUND_K) {
+    for (size_t iz = 0; iz < zones.size(); iz++) {
+      minval = (zones[iz].K < minval) ? zones[iz].K : minval;
+      maxval = (zones[iz].K > maxval) ? zones[iz].K : maxval;
+    }
+  } else if (material_around_option == MAT_AROUND_PRESSURE) {
+    for (size_t iz = 0; iz < zones.size(); iz++) {
+      minval = (zones[iz].pressure < minval) ? zones[iz].pressure : minval;
+      maxval = (zones[iz].pressure > maxval) ? zones[iz].pressure : maxval;
+    }
+  }
+
   // display the zones
   ColorTable CT;
-  CT.setMinMax(-2.0, 2.0);
+  CT.setMinMax(minval, maxval);
   colorRGBA col;
   glLineWidth(1.0f);
-  // glColor4f(1.0f, 0.1f, 0.9f, 1.0f);
+
   for (size_t iz = 0; iz < zones.size(); iz++) {
 
-    CT.getRGB(zones[iz].K, &col);
-    glColor4f(col.r / 255.0f, col.g / 255.0f, col.b / 255.0f, 0.5f);
+    if (material_around_option == MAT_AROUND_K) {
+      CT.getRGB(zones[iz].K, &col);
+    } else if (material_around_option == MAT_AROUND_PRESSURE) {
+      CT.getRGB(zones[iz].pressure, &col);
+    }
+
+    glColor3f(col.r / 255.0f, col.g / 255.0f, col.b / 255.0f);
 
     glBegin(GL_POLYGON);
     glVertex2f(zones[iz].corner[0].x, zones[iz].corner[0].y);
@@ -570,11 +588,15 @@ void renderMaterialArround() {
 }
 
 void plotPipe() {
+  if (mouse_mode != NOTHING) {
+    return;
+  }
+
   // Compute N, M, hoop-stress ...
   size_t nbNodes = Conf.pipe.pos.size();
 
   vec2r center;
-  for (size_t i = 0; i < Conf.pipe.pos.size(); i++) {
+  for (size_t i = 0; i < nbNodes; i++) {
     vec2r barPos = Conf.Cell.h * Conf.pipe.pos[i] + 0.5 * Conf.pipe.L[i] * Conf.pipe.u[i];
     center += barPos;
   }
@@ -596,13 +618,12 @@ void plotPipe() {
     if (inext >= nbNodes) {
       inext = 0;
     }
-    vec2r df = Conf.pipe.force[inext] - Conf.pipe.force[i]; // It is not clear why the sign is like that
-    pnd[i].N = df * Conf.pipe.u[i];                         // 0.5 * df * Conf.pipe.u[i];
+    vec2r df = Conf.pipe.force[inext] - Conf.pipe.force[i];
+    pnd[i].N = df * Conf.pipe.u[i];
 
-    pnd[i].M = cross(0.5 * Conf.pipe.L[i] * Conf.pipe.u[i], Conf.pipe.force[inext] - Conf.pipe.force[i]);
+    pnd[i].M = cross(0.5 * Conf.pipe.L[i] * Conf.pipe.u[i], Conf.pipe.force[inext] + Conf.pipe.force[i]);
     double e = 2.0 * Conf.pipe.node_radius;
     pnd[i].externalHoopStress = (pnd[i].N / e - 6 * pnd[i].M / (e * e));
-    // std::cout << A << ' ' << pnd[i].N << ' ' << pnd[i].M << ' ' << pnd[i].externalHoopStress << '\n';
   }
   meanPipeRadius /= (double)(nbNodes);
 
@@ -628,11 +649,11 @@ void plotPipe() {
   }
   double rescale = 1.0;
   if (pipe_plot_option == PLOT_AXIAL_FORCE) {
-    rescale = 0.5 * fabs(meanPipeRadius / Nmin);
+    rescale = 0.25*fabs(meanPipeRadius / (Nmax-Nmin));
   } else if (pipe_plot_option == PLOT_BENDING_MOMENT) {
-    rescale = 0.5 * fabs(meanPipeRadius / Mmin);
+    rescale = 0.25*fabs(meanPipeRadius / (Mmax-Mmin));
   } else if (pipe_plot_option == PLOT_HOOPSTRESS) {
-    rescale = 0.5 * fabs(meanPipeRadius / Smin);
+    rescale = 0.25 * fabs(meanPipeRadius / (Smax-Smin));
   }
 
   glBegin(GL_LINES);
@@ -669,13 +690,32 @@ void plotPipe() {
       f2 = pnd[inext].externalHoopStress * rescale;
     }
 
+    if (f1 > 1e-8) {
+      glColor3f(1.0f, 0.0f, 0.0f);
+    } else if (f1 < -1e-8) {
+      glColor3f(0.0f, 0.0f, 1.0f);
+    } else {
+      glColor3f(0.0f, 1.0f, 0.0f);
+    }
     glVertex2f(pos.x + f1 * T1.x, pos.y + f1 * T1.y);
+    
+    if (f2 > 1e-8) {
+      glColor3f(1.0f, 0.0f, 0.0f);
+    } else if (f2 < -1e-8) {
+      glColor3f(0.0f, 0.0f, 1.0f);
+    } else {
+      glColor3f(0.0f, 1.0f, 0.0f);
+    }
     glVertex2f(nextPos.x + f2 * T2.x, nextPos.y + f2 * T2.y);
   }
   glEnd();
 }
 
 void drawPipe() {
+  if (mouse_mode != NOTHING) {
+    return;
+  }
+
   glLineWidth(1.0f);
   glColor4f(0.0f, 0.0f, 0.0f, alpha_particles);
 
@@ -715,6 +755,10 @@ void drawPipe() {
 }
 
 void drawParticles() {
+  if (mouse_mode != NOTHING) {
+    return;
+  }
+
   glLineWidth(1.0f);
 
   for (size_t i = 0; i < Conf.Particles.size(); ++i) {
@@ -746,7 +790,9 @@ void drawParticles() {
 }
 
 void drawGhosts() {
-  // if (mouse_mode != NOTHING && box.Particles.size() > 2000) return;
+  if (mouse_mode != NOTHING) {
+    return;
+  }
 
   std::vector<vec2r> lst_pos; // list of reduced positions of ghost particles
   double mn = ghost_width;
@@ -786,6 +832,10 @@ void drawGhosts() {
 }
 
 void drawContacts() {
+  if (mouse_mode != NOTHING) {
+    return;
+  }
+
   glLineWidth(1.5f);
 
   // grain-grain
@@ -827,6 +877,10 @@ void drawContacts() {
 }
 
 void drawForces() {
+  if (mouse_mode != NOTHING) {
+    return;
+  }
+
   // grain-grain
   glColor4f(1.0f, 0.0f, 0.0f, 1.0f);
 
@@ -1004,6 +1058,15 @@ void menu(int num) {
     pipe_plot_option = PLOT_HOOPSTRESS;
   } break;
 
+  case 30: {
+    show_material_around = 1;
+    material_around_option = MAT_AROUND_K;
+  } break;
+  case 31: {
+    show_material_around = 1;
+    material_around_option = MAT_AROUND_PRESSURE;
+  } break;
+
     // case xx: {} break;
   };
 
@@ -1023,9 +1086,14 @@ void buildMenu() {
   glutAddMenuEntry("Bending moment", 21);
   glutAddMenuEntry("External Hoop Stress", 22);
 
+  int submenu3 = glutCreateMenu(menu);
+  glutAddMenuEntry("K", 30);
+  glutAddMenuEntry("pressure", 31);
+
   glutCreateMenu(menu); // Main menu
-  glutAddSubMenu("Pipe Display", submenu1);
-  glutAddSubMenu("Plot Option", submenu2);
+  glutAddSubMenu("Pipe Display Options", submenu1);
+  glutAddSubMenu("Polar Plot Options", submenu2);
+  glutAddSubMenu("Spider Map Options", submenu3);
   glutAddMenuEntry("Quit", 0);
 }
 
